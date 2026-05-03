@@ -1,0 +1,130 @@
+name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  # ── STAGE 1: Unit Tests ──────────────────────
+  test:
+    name: ✅ Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run tests
+        run: pytest tests/ -v
+
+  # ── STAGE 2: Bandit SAST Scan ────────────────
+  bandit-scan:
+    name: 🔍 Bandit - Code Scan
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Bandit
+        run: pip install bandit
+      - name: Run Bandit scan
+        run: |
+          bandit -r app/ -f txt -o bandit-report.txt || true
+          cat bandit-report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.txt
+
+  # ── STAGE 3: Safety Dependency Scan ──────────
+  safety-scan:
+    name: 📦 Safety - Dependency Scan
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Safety
+        run: pip install safety
+      - name: Run Safety scan
+        run: safety check -r requirements.txt || true
+
+  # ── STAGE 4: GitLeaks Secret Scan ────────────
+  gitleaks-scan:
+    name: 🔑 GitLeaks - Secret Detection
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run GitLeaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── STAGE 5: Docker Build ─────────────────────
+  docker-build:
+    name: 🐳 Docker Build
+    runs-on: ubuntu-latest
+    needs: [bandit-scan, safety-scan, gitleaks-scan]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t devsecops-demo:latest .
+      - name: Save image
+        run: docker save devsecops-demo:latest -o image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+
+  # ── STAGE 6: Trivy Container Scan ────────────
+  trivy-scan:
+    name: 🛡️ Trivy - Container Scan
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+      - name: Load Docker image
+        run: docker load -i image.tar
+      - name: Run Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "devsecops-demo:latest"
+          format: "table"
+          exit-code: "0"
+          severity: "CRITICAL,HIGH"
+
+  # ── STAGE 7: Summary ──────────────────────────
+  summary:
+    name: 📊 Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: trivy-scan
+    steps:
+      - name: Print summary
+        run: |
+          echo "============================================="
+          echo "      DevSecOps Pipeline Complete ✅         "
+          echo "============================================="
+          echo "  ✅ Unit Tests    — Passed"
+          echo "  🔍 Bandit        — Code scanned"
+          echo "  📦 Safety        — Dependencies checked"
+          echo "  🔑 GitLeaks      — No secrets found"
+          echo "  🐳 Docker        — Image built"
+          echo "  🛡️  Trivy         — Container scanned"
+          echo "============================================="

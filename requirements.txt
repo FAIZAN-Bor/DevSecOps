@@ -1,0 +1,6 @@
+flask==2.3.3
+werkzeug==2.3.7
+pytest==7.4.2
+bandit==1.7.5
+pbr>=5.8.0
+safety>=2.3.5
