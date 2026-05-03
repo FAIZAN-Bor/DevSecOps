@@ -7,10 +7,6 @@ users = [
     {"id": 2, "name": "Bob",   "role": "developer"},
 ]
 
-# You accidentally hardcode a password
-SECRET_KEY = "mypassword123"
-db_password = "admin@123"
-
 @app.route("/")
 def home():
     return jsonify({
